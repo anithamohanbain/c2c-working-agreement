@@ -57,24 +57,35 @@
 
       const startDrag = (e) => {
         dragging.current = true;
-        offset.current = { x: e.clientX - note.x, y: e.clientY - note.y };
+        // offset relative to document, not viewport
+        offset.current = {
+          x: e.clientX + window.scrollX - note.x,
+          y: e.clientY + window.scrollY - note.y
+        };
         e.preventDefault();
       };
 
       useEffect(() => {
         const move = (e) => {
           if (!dragging.current) return;
-          onUpdate({ ...note, x: e.clientX - offset.current.x, y: e.clientY - offset.current.y });
+          onUpdate({
+            ...note,
+            x: e.clientX + window.scrollX - offset.current.x,
+            y: e.clientY + window.scrollY - offset.current.y
+          });
         };
         const up = () => { dragging.current = false; };
         window.addEventListener("mousemove", move);
         window.addEventListener("mouseup", up);
-        return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+        return () => {
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("mouseup", up);
+        };
       }, [note, onUpdate]);
 
       return (
         <div style={{
-          position: "fixed", left: note.x, top: note.y, width: 190, minHeight: 90, zIndex: 900,
+          position: "absolute", left: note.x, top: note.y, width: 190, minHeight: 90, zIndex: 900,
           background: col.bg, border: `1px solid ${col.border}`, borderRadius: 3, padding: "8px 10px",
           boxShadow: "2px 3px 10px rgba(0,0,0,0.18)", fontFamily: "Arial, sans-serif", fontSize: 12,
         }}>
@@ -141,8 +152,9 @@
         const id = generateId();
         const newNote = {
           id, color, author, text: "",
-          x: Math.min(window.innerWidth - 210, 200 + stickies.length * 22),
-          y: Math.min(window.innerHeight - 160, 120 + stickies.length * 22),
+          // place relative to document, accounting for scroll and toolbar height
+          x: Math.min(document.body.scrollWidth - 210, window.scrollX + window.innerWidth - 250),
+          y: Math.max(100, window.scrollY + 100 + stickies.length * 22),
           ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         };
         const updated = [...stickies, newNote];
@@ -187,7 +199,7 @@
       );
 
       return (
-        <div style={{ fontFamily: "Arial, Helvetica, sans-serif", fontSize: 15, lineHeight: "24px", color: "#333", background: "#fff", minHeight: "100vh" }}>
+        <div style={{ fontFamily: "Arial, Helvetica, sans-serif", fontSize: 15, lineHeight: "24px", color: "#333", background: "#fff", minHeight: "100vh", position: "relative" }}>
 
           {stickies.map(note => <Sticky key={note.id} note={note} onUpdate={updateSticky} onDelete={deleteSticky} />)}
 
