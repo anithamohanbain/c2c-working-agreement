@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C2C Working Agreement</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #333; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const BIN_ID = "6a8c64caf5f4af5e293cb120";
+    const API_KEY = "$2a$10$4INHaWdCrZZA3hZitW0iWOpTFv5zBTAfZQB.cQ8C1EkSF091H1wSe";
+    const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+    const POLL_INTERVAL = 5000;
+
+    const COLORS = {
+      yellow: { bg: "#FEF7A0", border: "#E8D800" },
+      pink:   { bg: "#FFE0EE", border: "#FFB3D1" },
+      green:  { bg: "#D4F5E2", border: "#7ECBA8" },
+      blue:   { bg: "#D6EAFF", border: "#88B7E3" },
+    };
+
+    function generateId() {
+      return Math.random().toString(36).slice(2, 9);
+    }
+
+    async function loadFromBin() {
+      const res = await fetch(API_URL + "/latest", {
+        headers: { "X-Master-Key": API_KEY }
+      });
+      const data = await res.json();
+      return data.record?.stickies || [];
+    }
+
+    async function saveToBin(stickies) {
+      await fetch(API_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Master-Key": API_KEY },
+        body: JSON.stringify({ stickies })
+      });
+    }
+
+    function Sticky({ note, onUpdate, onDelete }) {
+      const dragging = useRef(false);
+      const offset = useRef({ x: 0, y: 0 });
+      const col = COLORS[note.color] || COLORS.yellow;
+
+      const startDrag = (e) => {
+        dragging.current = true;
+        offset.current = { x: e.clientX - note.x, y: e.clientY - note.y };
+        e.preventDefault();
+      };
+
+      useEffect(() => {
+        const move = (e) => {
+          if (!dragging.current) return;
+          onUpdate({ ...note, x: e.clientX - offset.current.x, y: e.clientY - offset.current.y });
+        };
+        const up = () => { dragging.current = false; };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", up);
+        return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+      }, [note, onUpdate]);
+
+      return (
+        <div style={{
+          position: "fixed", left: note.x, top: note.y, width: 190, minHeight: 90, zIndex: 900,
+          background: col.bg, border: `1px solid ${col.border}`, borderRadius: 3, padding: "8px 10px",
+          boxShadow: "2px 3px 10px rgba(0,0,0,0.18)", fontFamily: "Arial, sans-serif", fontSize: 12,
+        }}>
+          <div onMouseDown={startDrag} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
+            color: "#999", marginBottom: 5, cursor: "move", userSelect: "none"
+          }}>
+            <span>{note.author || "Note"}</span>
+            <button onClick={() => onDelete(note.id)} style={{
+              background: "none", border: "none", color: "#bbb", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 0
+            }}>×</button>
+          </div>
+          <div
+            contentEditable suppressContentEditableWarning
+            onBlur={(e) => onUpdate({ ...note, text: e.target.innerText })}
+            style={{ outline: "none", minHeight: 48, lineHeight: "18px", color: "#333", fontSize: 12, wordBreak: "break-word" }}
+            dangerouslySetInnerHTML={{ __html: note.text || "" }}
+          />
+          <div style={{ fontSize: 9, color: "#aaa", marginTop: 6, textAlign: "right" }}>{note.ts}</div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [stickies, setStickies] = useState([]);
+      const [color, setColor] = useState("yellow");
+      const [author, setAuthor] = useState(() => localStorage.getItem("c2c-author") || "");
+      const [authorSet, setAuthorSet] = useState(() => !!localStorage.getItem("c2c-author"));
+      const [authorInput, setAuthorInput] = useState("");
+      const [syncing, setSyncing] = useState(false);
+      const [lastSync, setLastSync] = useState(null);
+      const saveTimeout = useRef(null);
+
+      const load = useCallback(async () => {
+        try {
+          const notes = await loadFromBin();
+          setStickies(notes);
+          setLastSync(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        } catch(e) {}
+      }, []);
+
+      const save = useCallback(async (notes) => {
+        setSyncing(true);
+        try {
+          await saveToBin(notes);
+          setLastSync(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        } catch(e) {}
+        setSyncing(false);
+      }, []);
+
+      const debouncedSave = useCallback((notes) => {
+        clearTimeout(saveTimeout.current);
+        saveTimeout.current = setTimeout(() => save(notes), 800);
+      }, [save]);
+
+      useEffect(() => {
+        load();
+        const interval = setInterval(load, POLL_INTERVAL);
+        return () => clearInterval(interval);
+      }, [load]);
+
+      const addSticky = () => {
+        const id = generateId();
+        const newNote = {
+          id, color, author, text: "",
+          x: Math.min(window.innerWidth - 210, 200 + stickies.length * 22),
+          y: Math.min(window.innerHeight - 160, 120 + stickies.length * 22),
+          ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
+        const updated = [...stickies, newNote];
+        setStickies(updated);
+        save(updated);
+      };
+
+      const updateSticky = (note) => {
+        const updated = stickies.map(s => s.id === note.id ? note : s);
+        setStickies(updated);
+        debouncedSave(updated);
+      };
+
+      const deleteSticky = (id) => {
+        const updated = stickies.filter(s => s.id !== id);
+        setStickies(updated);
+        save(updated);
+      };
+
+      const setName = () => {
+        const name = authorInput.trim();
+        if (!name) return;
+        setAuthor(name);
+        setAuthorSet(true);
+        localStorage.setItem("c2c-author", name);
+      };
+
+      if (!authorSet) return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f9f9f9" }}>
+          <div style={{ background: "#fff", border: "1px solid #D8D8D8", borderRadius: 4, padding: "32px 40px", maxWidth: 340, width: "100%", textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#CC0000", marginBottom: 8 }}>C2C Working Agreement</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#000", marginBottom: 6 }}>Who are you?</div>
+            <div style={{ fontSize: 13, color: "#717171", marginBottom: 20, lineHeight: "20px" }}>Enter your name so your sticky notes are attributed to you.</div>
+            <input autoFocus value={authorInput} onChange={e => setAuthorInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && setName()} placeholder="Your name"
+              style={{ width: "100%", padding: "8px 12px", border: "1px solid #D8D8D8", borderRadius: 2, fontSize: 14, marginBottom: 12, outline: "none", fontFamily: "Arial, sans-serif" }} />
+            <button onClick={setName} style={{ width: "100%", background: "#CC0000", color: "#fff", border: "none", borderRadius: 2, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+              Continue →
+            </button>
+          </div>
+        </div>
+      );
+
+      return (
+        <div style={{ fontFamily: "Arial, Helvetica, sans-serif", fontSize: 15, lineHeight: "24px", color: "#333", background: "#fff", minHeight: "100vh" }}>
+
+          {stickies.map(note => <Sticky key={note.id} note={note} onUpdate={updateSticky} onDelete={deleteSticky} />)}
+
+          {/* Toolbar */}
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 44, background: "#fff", borderBottom: "2px solid #CC0000", display: "flex", alignItems: "center", gap: 8, padding: "0 16px", zIndex: 1000, boxShadow: "0 2px 8px rgba(0,0,0,0.08)" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#CC0000", textTransform: "uppercase", letterSpacing: "0.06em", marginRight: 6 }}>C2C Working Agreement</span>
+            <button onClick={addSticky} style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", background: "#CC0000", color: "#fff", border: "none", borderRadius: 2, cursor: "pointer" }}>+ Sticky note</button>
+            <span style={{ fontSize: 11, color: "#717171" }}>Color:</span>
+            {Object.entries(COLORS).map(([key, val]) => (
+              <div key={key} onClick={() => setColor(key)} style={{ width: 16, height: 16, borderRadius: 2, background: val.bg, border: `2px solid ${color === key ? "#333" : val.border}`, cursor: "pointer" }} />
+            ))}
+            <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>Posting as <strong style={{ color: "#333" }}>{author}</strong></span>
+            <span style={{ marginLeft: "auto", fontSize: 10, color: "#aaa" }}>
+              {syncing ? "⏳ Saving..." : lastSync ? `✓ Synced ${lastSync}` : ""} · Refreshes every 5s
+            </span>
+          </div>
+
+          {/* Page */}
+          <div style={{ maxWidth: 800, margin: "0 auto", padding: "60px 32px 48px" }}>
+
+            <div style={{ borderBottom: "3px solid #CC0000", paddingBottom: 20, marginBottom: 32 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#CC0000", marginBottom: 6 }}>C2C Engineering team · Sprint cadence & working agreement</div>
+              <h1 style={{ fontSize: 30, fontWeight: 700, lineHeight: "38px", color: "#000", margin: "0 0 8px" }}>How we work</h1>
+              <p style={{ fontSize: 14, color: "#616568" }}>Our sprint cadence, ceremonies, and the working agreements that govern how we collaborate across Chicago and Delhi.</p>
+            </div>
+
+            <Section title="Why this work matters">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+                {[
+                  ["C2C is how PEG partners run their business", "Every pipeline view, expert call tracked, and status update in this system is something a partner looks at before a client meeting, a weekly call, or a staffing decision. When it works, it's invisible. When it breaks, partners notice immediately."],
+                  ["GLS is the moment we are building toward", "Mid-October, PEG partners from across the global network are in one place. Our GLS commit is a continuous-motion pipeline that surfaces the next best action while minimizing manual ops. What we ship between now and then is what partners will have in their hands on that stage."],
+                  ["Quality and speed both matter", "October doesn't move. But we can't ship broken software — a production incident isn't a Jira ticket, it's a partner who can't run their call. Every person on this team has a direct line to the partner experience. That's not pressure. That's the point."],
+                ].map(([h,p]) => (
+                  <div key={h} style={{ background: "#F9F9F9", borderTop: "3px solid #CC0000", padding: 16, borderRadius: 2 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#000", marginBottom: 5 }}>{h}</div>
+                    <div style={{ fontSize: 13, lineHeight: "20px", color: "#616568" }}>{p}</div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Why one-week sprints">
+              <p style={{ fontSize: 14, lineHeight: "22px", color: "#616568", maxWidth: 720 }}>Requirements shift week to week as partner and stakeholder feedback comes in. A one-week sprint means the team is always building against the latest priorities — not a plan that was right two weeks ago. It also keeps integration risk low: smaller increments are easier to test, easier to roll back, and easier to demo.</p>
+            </Section>
+
+            <Section title="Sprint at a glance · Wed → Tue · Chicago (CT) / Delhi (IST)">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, marginBottom: 12 }}>
+                {[
+                  { day: "Wednesday", events: [{ color: "#E899C0", name: "Release", note: "By 12:00 PM IST" }, { color: "#7ECBA8", name: "Standup", note: "15 min · 8:00 AM CT" }] },
+                  { day: "Thursday", events: [{ color: "#7ECBA8", name: "Standup", note: "15 min · 8:00 AM CT" }, { color: "#88B7E3", name: "Refinement", note: "~8:15 AM CT / 6:45 PM IST" }] },
+                  { day: "Friday", border: true, events: [{ color: "#C5BFED", name: "Async standup", note: "Post by 8:00 AM CT" }] },
+                  { day: "Monday", events: [{ color: "#7ECBA8", name: "Standup", note: "15 min · 8:00 AM CT" }, { color: "#88B7E3", name: "Refinement", note: "~8:15 AM CT / 6:45 PM IST" }] },
+                  { day: "Tuesday", events: [
+                    { color: "#F09A7A", name: "Sprint review", note: "30 min · 8:00 AM CT / 6:30 PM IST" },
+                    { color: "#F09A7A", name: "Review discussion", note: "15 min · 8:30 AM CT / 7:00 PM IST" },
+                    { color: "#B0B8EE", name: "Sprint planning", note: "30 min · 8:45 AM CT / 7:15 PM IST" },
+                    { dashed: true, note: "Release branch freeze — EOD" },
+                    { warning: true, note: "⚠ Retrospective — bi-weekly · EM to schedule" },
+                  ]},
+                ].map(({ day, events, border }) => (
+                  <div key={day} style={{ border: "1px solid #D8D8D8", borderRadius: 4, overflow: "hidden", ...(border ? { borderRight: "4px solid #CC0000" } : {}) }}>
+                    <div style={{ padding: "6px 10px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", background: "#F9F9F9", color: "#717171", borderBottom: "1px solid #D8D8D8" }}>{day}</div>
+                    <div style={{ padding: 10 }}>
+                      {events.map((ev, i) => ev.dashed ? (
+                        <div key={i} style={{ fontSize: 9, color: "#717171", fontStyle: "italic", marginTop: 5, padding: "1px 5px", background: "#F9F9F9", border: "1px dashed #D8D8D8", borderRadius: 2, display: "inline-block", lineHeight: "14px" }}>{ev.note}</div>
+                      ) : ev.warning ? (
+                        <div key={i} style={{ fontSize: 9, color: "#7A5F00", fontStyle: "italic", marginTop: 5, padding: "1px 5px", background: "#FEF7E8", border: "1px dashed #F1C21B", borderRadius: 2, display: "inline-block", lineHeight: "14px" }}>{ev.note}</div>
+                      ) : (
+                        <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 7 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, marginTop: 3, background: ev.color, display: "inline-block" }} />
+                          <div>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "#333", display: "block", lineHeight: "16px" }}>{ev.name}</span>
+                            <span style={{ fontSize: 11, color: "#717171", display: "block", lineHeight: "15px" }}>{ev.note}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Ceremonies">
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <tbody>
+                  {[
+                    { name: "Standup", when: "Mon, Wed, Thu · 8:00 AM CT / 6:30 PM IST", dur: "15 min · Fri async · Tue no standup (sprint review + planning day)", who: ["PO listens", "Dev + QA lead"],
+                      desc: "Team-led daily sync. EM facilitates, Dev and QA speak, PO listens and acts on blockers after the call. Standup is blockers and decisions only — not a status report, not a planning session.",
+                      items: ["Dev and QA: cover what you completed, where you are in current work, what is in the way — \"working on PEG-12345\" is not an update", "Dev and QA: update your Jira ticket status before standup — if it moved, Jira should reflect it", "Dev and QA: if a question is blocking active work, flag it in 30 seconds — \"this is blocking me, I need an answer today\"", "PO and blocked dev: stay on after standup for a 10-minute huddle — not the whole team", "Dev who flagged the blocker: document the resolution in Jira immediately after — not in chat", "EM: if the same ticket keeps generating questions in standup, send it back to refinement", "PO: resolve all other blockers after standup in Jira — not during the call"] },
+                    { name: "Sprint review + Review discussion", when: "Tuesday · 8:00 AM CT / 6:30 PM IST", dur: "30 min review + 15 min discussion · weekly", who: ["PO", "Dev + QA"],
+                      desc: "Working demo of what shipped — no slides. Closes the loop on the sprint goal and surfaces feedback before the next sprint starts. Followed immediately by a 15-minute discussion to address any work that came out of the review.",
+                      items: ["Dev and QA: demo completed work against the sprint goal — no slides", "Dev and QA: note anything that didn't make it and why", "PO: confirm what carries over to next sprint and communicate any priority changes", "Everyone: use the 15-minute review discussion to surface and triage any work that emerged — decisions must be in Jira before the call ends", "EM: close the sprint in Jira at the end of the review discussion — all ticket statuses must be final before close"] },
+                    { name: "Sprint planning", when: "Tuesday · 8:45 AM CT / 7:15 PM IST · immediately after review discussion", dur: "30 min · weekly", who: ["PO", "Dev + QA"],
+                      desc: "PO pre-plans sprints and workstreams ahead of time so the team sees what's expected before the call. Every ticket must be understood before the team signs off. EM opens the sprint in Jira at the close of planning.",
+                      items: ["PO: present the sprint goal in one sentence before walking tickets", "PO: all sprint tickets must be in Jira with AC written before planning starts — no verbal-only scope", "PO: flag tickets that touch ops workflows before the team commits to them", "Dev and QA: ask your own questions on every ticket — this is the time, not standup", "Dev and QA: do not sign off on a ticket you do not fully understand", "EM: confirm capacity and flag any resourcing blockers before the sprint is locked", "EM: open the sprint in Jira at the end of planning"] },
+                    { name: "Refinement", when: "Thursday + Monday · ~8:15 AM CT / 6:45 PM IST", dur: "30–45 min · twice weekly · immediately after standup", who: ["PO", "Dev + QA"],
+                      desc: "The most important ceremony we have — and the reason standup stays short. PO prepares tickets with AC before the call. Dev and QA engage directly with the PO — every team member asks their own questions. EM participates as a peer, not a translator.",
+                      items: ["PO: share tickets with AC written before the session — the team cannot refine what they cannot read ahead of time", "Dev and QA: rotate who shares screen and walks each ticket — engagement is everyone's job", "Dev and QA: ask your own questions directly to the PO — do not wait for the EM to ask on your behalf", "EM: pause after each ticket and confirm the whole team understands before moving on", "PO: answer every open question in the session and update the PBI before the call ends", "EM: no ticket moves to dev with open questions — flag it and hold it", "PO: Thursday session covers next sprint tickets; Monday session closes gaps on current sprint tickets"] },
+                    { name: "Retrospective", when: "Bi-weekly · EM to schedule", dur: "45 min", who: ["PO", "Dev + QA"],
+                      desc: "Bi-weekly ceremony scheduled by the EM. The whole team participates including the PO. Retros are a reset, not a complaint session. Any team member can also request an ad-hoc retro between scheduled sessions.",
+                      items: ["EM: schedule bi-weekly retros in advance and hold the cadence — do not let it slip", "Any team member: request an ad-hoc retro at any time — EM schedules within the week", "Whole team: Start — what should we try?", "Whole team: Stop — what's slowing us down or causing rework?", "Whole team: Continue — what's working that we should protect?", "EM: every retro ends with named actions, owners, and a follow-up date"] },
+                    { name: "Release", when: "Wednesday · by 12:00 PM IST", dur: "", who: ["Dev + QA"],
+                      desc: "Wednesday release means anything flagged in Tuesday's review can be fixed before deploy. Nothing currently working can break — ops-impacting changes ship behind a feature flag.",
+                      items: ["QA: confirm all PRs are merged and QA sign-off is complete before deploy proceeds", "QA: ops regression check passed before deploy proceeds", "EM: deploy to prod and monitor", "EM: ping PO in chat when release is complete"] },
+                  ].map((c, i, arr) => (
+                    <tr key={c.name} style={{ borderBottom: i < arr.length - 1 ? "1px solid #D8D8D8" : "none" }}>
+                      <td style={{ padding: "14px 12px 14px 0", verticalAlign: "top", width: 170, minWidth: 170 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#000", marginBottom: 3 }}>{c.name}</div>
+                        <div style={{ fontSize: 11, color: "#717171", marginBottom: 2 }}>{c.when}</div>
+                        {c.dur && <div style={{ fontSize: 11, color: "#717171", marginBottom: 6 }}>{c.dur}</div>}
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          {c.who.map(w => <span key={w} style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 2, background: w.includes("PO") ? "#EEF0FC" : "#E8F5EF", color: w.includes("PO") ? "#2F3A8F" : "#0D5238" }}>{w}</span>)}
+                        </div>
+                      </td>
+                      <td style={{ padding: "14px 0", verticalAlign: "top" }}>
+                        <p style={{ fontSize: 13, lineHeight: "20px", color: "#616568", margin: "0 0 10px" }}>{c.desc}</p>
+                        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                          {c.items.map((item, j) => <li key={j} style={{ fontSize: 13, lineHeight: "20px", color: "#616568", padding: "2px 0 2px 14px", position: "relative" }}><span style={{ position: "absolute", left: 0, color: "#717171" }}>•</span>{item}</li>)}
+                        </ul>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Section>
+
+            <Section title="Ticket workflow">
+              <p style={{ fontSize: 14, lineHeight: "22px", color: "#616568", margin: "0 0 16px" }}>Every ticket follows this flow without exception. No ticket moves to Done without PO sign-off.</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+                {[["Dev","#E8F5EF","#7ECBA8","#0D5238"],["→",null,null,"#717171"],["QA","#EEF0FC","#B0B8EE","#2F3A8F"],["→",null,null,"#717171"],["PO Review","#FDEDF4","#E899C0","#6B1240"],["→",null,null,"#717171"],["Done","#DAF2ED","#07C29F","#055C47"]]
+                  .map(([label,bg,border,color],i) => bg
+                    ? <div key={i} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 4, padding: "10px 16px", fontSize: 13, fontWeight: 700, color }}>{label}</div>
+                    : <div key={i} style={{ color, fontSize: 18 }}>{label}</div>)}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Rule title="QA moves ticket to PO Review">QA: when satisfied, move the ticket to PO Review. PO: review same day. If rejected, PO moves the ticket back to Dev with a comment explaining what needs to change. Dev fixes, QA re-validates, QA moves back to PO Review.</Rule>
+                <Rule title="PO reviews same day">PO: review tickets the day QA moves them. A ticket sitting in PO Review overnight is a blocked ticket. If you cannot review same day, flag it to the EM so the team knows.</Rule>
+              </div>
+            </Section>
+
+            <Section title="Ground rules">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Rule title="When in doubt, flag it — don't ship it">If a change might affect ops workflows, raise it at standup. One disrupted ops user costs more than one delayed ticket.</Rule>
+                <Rule title="Raise blockers early — don't wait">Delhi's working day runs 10.5 hours ahead. A blocker raised at standup gets resolved before the next working day. Sitting on it costs a full day.</Rule>
+                <Rule title="Planning only works with prepared tickets">PO arrives with tickets written and prioritized. Discovery during planning means the sprint starts late.</Rule>
+                <Rule title="Jira is the source of truth — keep it current">If it's not in Jira, it doesn't exist. Update ticket status before standup. Decisions made verbally must be in the PBI the same day.</Rule>
+                <Rule title="We are moving toward continuous flow">One-week sprints are how we work today. As the team matures and refinement stabilizes, we will move toward a Kanban model — continuous delivery with quality gates built into the board rather than compressed at the end of a sprint.</Rule>
+              </div>
+            </Section>
+
+            <Section title="Working agreement">
+              {[
+                { heading: "How we communicate", cards: [
+                  { tag: "Channels", type: "collab", title: "Right conversation, right place", items: ["Everyone: PBI-level questions and decisions go in Jira comments on the ticket — not in chat","PO: business logic and requirements live in Confluence — keep it current so the team has a single source of truth","PO and EM: broader decisions and risks are documented in email so there is a record","EM: action items from any conversation get a Jira ticket assigned to an owner before the call ends","Everyone: chat and standup are not the place for scope or AC discussions"] },
+                  { tag: "Tone", type: "collab", title: "Mutual respect across every channel", items: ["Everyone: communicate with respect in standup, Jira, chat, and email","Everyone: give feedback constructively and receive it openly","Dev and QA: questions and pushback are welcomed — silence is not agreement","Dev and QA: engage directly with the PO in ceremonies — do not speak through the EM"] },
+                ]},
+                { heading: "How we run ceremonies", cards: [
+                  { tag: "Standup", type: "collab", title: "Team-led, PO listens", items: ["EM: facilitate standup, keep it moving, enforce the blocker-only format","PO: attend standup to hear blockers — resolve them after the call in Jira, not during","EM: if standup runs long, flag it — it means refinement didn't happen properly"] },
+                  { tag: "Refinement", type: "collab", title: "The whole team engages — not just the EM", items: ["Dev and QA: ask your own questions directly to the PO — do not wait for the EM to ask on your behalf","EM: participate as a peer, not as a translator between the team and the PO","PO and EM: every question raised gets answered and documented in the PBI before the session ends","Everyone: if refinement is working, standup is short — they are connected"] },
+                ]},
+                { heading: "How we handle PBIs", cards: [
+                  { tag: "Jira", type: "jira", title: "What \"ready for dev\" means", items: ["PO: AC is written, current, and reflects all answers from refinement before the ticket moves to dev","PO: confirm no open questions remain in comments or chat before the ticket is pulled into a sprint","PO: identify dependencies and impacted workflows in the ticket before refinement","EM: a ticket with unresolved questions or stale AC does not move to dev — hold it"] },
+                  { tag: "Jira", type: "jira", title: "PO response commitment", items: ["PO: respond to Jira comments before the team's next working day starts","PO: unanswered Jira questions drive questions into standup — timely responses keep standup short","PO: if AC changes based on a Jira discussion, update it same day","Dev and QA: if you find during the sprint that AC doesn't match actual behavior, add a comment to the PBI describing the gap and flag it to the PO"] },
+                ]},
+              ].map(({ heading, cards }) => (
+                <div key={heading} style={{ marginBottom: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 700, color: "#000", margin: "0 0 10px", paddingLeft: 10, borderLeft: "3px solid #CC0000" }}>{heading}</h3>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {cards.map(card => (
+                      <div key={card.title} style={{ background: "#F9F9F9", borderRadius: 2, padding: "14px 16px" }}>
+                        <WaTag type={card.type}>{card.tag}</WaTag>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 5px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{card.title}</div>
+                        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                          {card.items.map((item,i) => <li key={i} style={{ fontSize: 13, lineHeight: "20px", color: "#616568", padding: "2px 0 2px 14px", position: "relative" }}><span style={{ position: "absolute", left: 0, color: "#717171" }}>•</span>{item}</li>)}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div style={{ marginBottom: 20 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: "#000", margin: "0 0 10px", paddingLeft: 10, borderLeft: "3px solid #CC0000" }}>Tools and visibility</h3>
+                {[
+                  { tag: "Workflows Agent", type: "jira", title: "PR visibility in Teams", text: "The Workflows Agent posts a notification in Teams when a PR is open and needs a reviewer. This gives the whole team visibility into what is sitting in review without having to check manually. If a PR is not ready for review, move it to draft immediately so it does not sit unassigned and create noise for the team." },
+                  { tag: "QA", type: "qa", title: "QA is a non-negotiable gate", text: "QA sign-off is required before any release moves to production. This is not a rubber stamp — if a release is not ready, it does not ship. Smoke testing alone is not sufficient — manual validation of key workflows including EMEA and AMER user configurations is required before every release." },
+                  { tag: "Releases", type: "qa", title: "Release windows and communication", text: "Releases happen Wednesday by 12:00 PM IST. No release outside this window without advance notice to the PO and explicit sign-off. When a release completes, the PO is pinged in chat. If something goes wrong post-deploy, the team communicates immediately — not after a fix is already in progress." },
+                ].map(({ tag, type, title, text }) => (
+                  <div key={title} style={{ background: "#F9F9F9", borderRadius: 2, padding: "14px 16px", marginBottom: 10 }}>
+                    <WaTag type={type}>{tag}</WaTag>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{title}</div>
+                    <p style={{ fontSize: 13, lineHeight: "20px", color: "#616568", margin: 0 }}>{text}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: "#000", margin: "0 0 10px", paddingLeft: 10, borderLeft: "3px solid #CC0000" }}>How we handle scope and pressure</h3>
+                {[
+                  { tag: "Scope", type: "scope", title: "Same-day requests are a refinement problem", text: "When PBIs are properly understood before the sprint starts, same-day requests shrink because the team has already surfaced the edge cases and dependencies. If a same-day request arrives that would require skipping QA, compressing testing, or releasing outside the agreed window, the team flags it to the PO immediately." },
+                  { tag: "Priority", type: "scope", title: "When everything is P1, nothing is", text: "The PO maintains a clear priority stack and communicates it to the team before each sprint. If a new request arrives mid-sprint that could displace committed work, the PO decides what moves and communicates the trade-off. The team does not self-reprioritize without that conversation." },
+                ].map(({ tag, type, title, text }) => (
+                  <div key={title} style={{ background: "#F9F9F9", borderRadius: 2, padding: "14px 16px", marginBottom: 10 }}>
+                    <WaTag type={type}>{tag}</WaTag>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{title}</div>
+                    <p style={{ fontSize: 13, lineHeight: "20px", color: "#616568", margin: 0 }}>{text}</p>
+                  </div>
+                ))}
+              </div>
+            </Section>
+
+            <div style={{ marginTop: 48, paddingTop: 14, borderTop: "1px solid #D8D8D8", fontSize: 11, color: "#717171" }}>
+              Wed → Tue sprint · Release on Wed · Chicago (CT) ↔ Delhi (IST) · Working agreement v2 · Aug 2026
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Section({ title, children }) {
+      return (
+        <div style={{ marginBottom: 32 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: "#000", margin: "0 0 16px", paddingBottom: 8, borderBottom: "1px solid #D8D8D8" }}>{title}</h2>
+          {children}
+        </div>
+      );
+    }
+
+    function Rule({ title, children }) {
+      return (
+        <div style={{ padding: "14px 16px", background: "#F9F9F9", borderRadius: 2 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#000", marginBottom: 4 }}>{title}</div>
+          <div style={{ fontSize: 13, lineHeight: "20px", color: "#616568" }}>{children}</div>
+        </div>
+      );
+    }
+
+    const TAG_STYLES = {
+      collab: { background: "#EEF0FC", color: "#2F3A8F" },
+      jira:   { background: "#E8F5EF", color: "#0D5238" },
+      qa:     { background: "#FDEDF4", color: "#6B1240" },
+      scope:  { background: "#FAF0DC", color: "#5C3006" },
+    };
+
+    function WaTag({ type, children }) {
+      const s = TAG_STYLES[type] || TAG_STYLES.collab;
+      return <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 2, marginBottom: 8, ...s }}>{children}</span>;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
