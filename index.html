@@ -387,13 +387,15 @@
             <Section title="Ticket workflow">
               <p style={{ fontSize: 14, lineHeight: "22px", color: "#616568", margin: "0 0 16px" }}>Every ticket follows this flow without exception. No ticket moves to Done without PO sign-off.</p>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-                {[["Dev","#E8F5EF","#7ECBA8","#0D5238"],["→",null,null,"#717171"],["QA","#EEF0FC","#B0B8EE","#2F3A8F"],["→",null,null,"#717171"],["PO Review","#FDEDF4","#E899C0","#6B1240"],["→",null,null,"#717171"],["Done","#DAF2ED","#07C29F","#055C47"]]
+                {[["Dev","#E8F5EF","#7ECBA8","#0D5238"],["→",null,null,"#717171"],["Peer testing","#FEF7E8","#F1C21B","#7A5F00"],["→",null,null,"#717171"],["QA","#EEF0FC","#B0B8EE","#2F3A8F"],["→",null,null,"#717171"],["UAT","#FDF0FC","#D09BE8","#5B2181"],["→",null,null,"#717171"],["PO Review","#FDEDF4","#E899C0","#6B1240"],["→",null,null,"#717171"],["Done","#DAF2ED","#07C29F","#055C47"]]
                   .map(([label,bg,border,color],i) => bg
                     ? <div key={i} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 4, padding: "10px 16px", fontSize: 13, fontWeight: 700, color }}>{label}</div>
                     : <div key={i} style={{ color, fontSize: 18 }}>{label}</div>)}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Rule title="QA moves ticket to PO review">QA: when satisfied, move the ticket to PO Review. PO: review same day. If rejected, PO moves the ticket back to Dev with a comment explaining what needs to change. Dev fixes, QA re-validates, QA moves back to PO Review.</Rule>
+                <Rule title="Peer testing on Dev">Dev: once development is complete, peer testing is done on the Dev environment before the ticket moves to QA. This catches obvious issues before QA picks it up.</Rule>
+                <Rule title="QA testing on QA environment">QA: all testing is done on the QA environment. When satisfied, QA moves the ticket to PO Review. PO: review same day. If rejected, PO moves the ticket back to Dev with a comment explaining what needs to change. Dev fixes, QA re-validates, QA moves back to PO Review.</Rule>
+                <Rule title="PO sign-off on QA or UAT">PO: provide sign-off on QA or UAT before the ticket moves to Done. This is not a rubber stamp — if the ticket is not ready, it does not move forward.</Rule>
                 <Rule title="PO reviews same day">PO: review tickets the day QA moves them. A ticket sitting in PO Review overnight is a blocked ticket. If you cannot review same day, flag it to the EM so the team knows.</Rule>
               </div>
             </Section>
