@@ -57,35 +57,24 @@
 
       const startDrag = (e) => {
         dragging.current = true;
-        // offset relative to document, not viewport
-        offset.current = {
-          x: e.clientX + window.scrollX - note.x,
-          y: e.clientY + window.scrollY - note.y
-        };
+        offset.current = { x: e.clientX - note.x, y: e.clientY - note.y };
         e.preventDefault();
       };
 
       useEffect(() => {
         const move = (e) => {
           if (!dragging.current) return;
-          onUpdate({
-            ...note,
-            x: e.clientX + window.scrollX - offset.current.x,
-            y: e.clientY + window.scrollY - offset.current.y
-          });
+          onUpdate({ ...note, x: e.clientX - offset.current.x, y: e.clientY - offset.current.y });
         };
         const up = () => { dragging.current = false; };
         window.addEventListener("mousemove", move);
         window.addEventListener("mouseup", up);
-        return () => {
-          window.removeEventListener("mousemove", move);
-          window.removeEventListener("mouseup", up);
-        };
+        return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
       }, [note, onUpdate]);
 
       return (
         <div style={{
-          position: "absolute", left: note.x, top: note.y, width: 190, minHeight: 90, zIndex: 900,
+          position: "fixed", left: note.x, top: note.y, width: 190, minHeight: 90, zIndex: 900,
           background: col.bg, border: `1px solid ${col.border}`, borderRadius: 3, padding: "8px 10px",
           boxShadow: "2px 3px 10px rgba(0,0,0,0.18)", fontFamily: "Arial, sans-serif", fontSize: 12,
         }}>
@@ -97,7 +86,7 @@
             <span>{note.author || "Note"}</span>
             <button onClick={() => onDelete(note.id)} style={{
               background: "none", border: "none", color: "#bbb", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 0
-            }}>×</button>
+            }}>x</button>
           </div>
           <div
             contentEditable suppressContentEditableWarning
@@ -108,6 +97,78 @@
           <div style={{ fontSize: 9, color: "#aaa", marginTop: 6, textAlign: "right" }}>{note.ts}</div>
         </div>
       );
+    }
+
+    // Role badge styles
+    const ROLE_STYLES = {
+      "PO":       { background: "#EEF0FC", color: "#2F3A8F" },
+      "Dev & QA": { background: "#E8F5EF", color: "#0D5238" },
+      "EM":       { background: "#FDEDF4", color: "#6B1240" },
+      "Everyone": { background: "#FAF0DC", color: "#5C3006" },
+      "QA":       { background: "#E8F5EF", color: "#0D5238" },
+      "Dev/QA/PO":{ background: "#EEF0FC", color: "#2F3A8F" },
+    };
+
+    function RoleBadge({ role }) {
+      const s = ROLE_STYLES[role] || ROLE_STYLES["Everyone"];
+      return (
+        <span style={{
+          display: "inline-block", fontSize: 10, fontWeight: 700,
+          padding: "2px 7px", borderRadius: 2, whiteSpace: "nowrap", ...s
+        }}>{role}</span>
+      );
+    }
+
+    function CeremonyTable({ items }) {
+      return (
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid #D8D8D8" }}>
+              <th style={{ fontSize: 11, fontWeight: 700, color: "#717171", textAlign: "left", padding: "6px 12px 6px 0", textTransform: "uppercase", letterSpacing: "0.05em", width: "70%" }}>Responsibility</th>
+              <th style={{ fontSize: 11, fontWeight: 700, color: "#717171", textAlign: "left", padding: "6px 0", textTransform: "uppercase", letterSpacing: "0.05em" }}>Who</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, i) => {
+              const parsed = parseItem(item);
+              return (
+                <tr key={i} style={{ borderBottom: i < items.length - 1 ? "1px solid #F0F0F0" : "none" }}>
+                  <td style={{ fontSize: 13, lineHeight: "19px", color: "#616568", padding: "7px 12px 7px 0", verticalAlign: "top" }}>{parsed.text}</td>
+                  <td style={{ padding: "7px 0", verticalAlign: "top" }}><RoleBadge role={parsed.role} /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      );
+    }
+
+    function cap(str) {
+      if (!str) return str;
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    function parseItem(item) {
+      const prefixes = [
+        { prefix: "Dev and QA:", role: "Dev & QA" },
+        { prefix: "DEV/QA/PO:", role: "Dev/QA/PO" },
+        { prefix: "Dev/QA/PO:", role: "Dev/QA/PO" },
+        { prefix: "PO and blocked dev:", role: "PO" },
+        { prefix: "Dev who flagged the blocker:", role: "Dev & QA" },
+        { prefix: "QA:", role: "QA" },
+        { prefix: "PO:", role: "PO" },
+        { prefix: "EM:", role: "EM" },
+        { prefix: "Everyone:", role: "Everyone" },
+        { prefix: "Any team member:", role: "Everyone" },
+        { prefix: "Whole team:", role: "Everyone" },
+        { prefix: "Team and EM:", role: "Everyone" },
+      ];
+      for (const { prefix, role } of prefixes) {
+        if (item.startsWith(prefix)) {
+          return { role, text: cap(item.slice(prefix.length).trim()) };
+        }
+      }
+      return { role: "Everyone", text: cap(item) };
     }
 
     function App() {
@@ -152,9 +213,8 @@
         const id = generateId();
         const newNote = {
           id, color, author, text: "",
-          // place relative to document, accounting for scroll and toolbar height
-          x: Math.min(document.body.scrollWidth - 210, window.scrollX + window.innerWidth - 250),
-          y: Math.max(100, window.scrollY + 100 + stickies.length * 22),
+          x: Math.min(window.innerWidth - 210, 200 + stickies.length * 22),
+          y: Math.min(window.innerHeight - 160, 120 + stickies.length * 22),
           ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         };
         const updated = [...stickies, newNote];
@@ -192,14 +252,14 @@
               onKeyDown={e => e.key === "Enter" && setName()} placeholder="Your name"
               style={{ width: "100%", padding: "8px 12px", border: "1px solid #D8D8D8", borderRadius: 2, fontSize: 14, marginBottom: 12, outline: "none", fontFamily: "Arial, sans-serif" }} />
             <button onClick={setName} style={{ width: "100%", background: "#CC0000", color: "#fff", border: "none", borderRadius: 2, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-              Continue →
+              Continue
             </button>
           </div>
         </div>
       );
 
       return (
-        <div style={{ fontFamily: "Arial, Helvetica, sans-serif", fontSize: 15, lineHeight: "24px", color: "#333", background: "#fff", minHeight: "100vh", position: "relative" }}>
+        <div style={{ fontFamily: "Arial, Helvetica, sans-serif", fontSize: 15, lineHeight: "24px", color: "#333", background: "#fff", minHeight: "100vh" }}>
 
           {stickies.map(note => <Sticky key={note.id} note={note} onUpdate={updateSticky} onDelete={deleteSticky} />)}
 
@@ -213,7 +273,7 @@
             ))}
             <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>Posting as <strong style={{ color: "#333" }}>{author}</strong></span>
             <span style={{ marginLeft: "auto", fontSize: 10, color: "#aaa" }}>
-              {syncing ? "⏳ Saving..." : lastSync ? `✓ Synced ${lastSync}` : ""} · Refreshes every 1s
+              {syncing ? "Saving..." : lastSync ? `Synced ${lastSync}` : ""} · Refreshes every 1s
             </span>
           </div>
 
@@ -245,7 +305,7 @@
               <p style={{ fontSize: 14, lineHeight: "22px", color: "#616568", maxWidth: 720 }}>Requirements shift week to week as partner and stakeholder feedback comes in. A one-week sprint means the team is always building against the latest priorities — not a plan that was right two weeks ago. It also keeps integration risk low: smaller increments are easier to test, easier to roll back, and easier to demo.</p>
             </Section>
 
-            <Section title="Sprint at a glance · Wed → Tue · Chicago (CT) / Delhi (IST)">
+            <Section title="Sprint at a glance · Wed to Tue · Chicago (CT) / Delhi (IST)">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, marginBottom: 12 }}>
                 {[
                   { day: "Wednesday", events: [{ color: "#E899C0", name: "Release", note: "By 12:00 PM IST" }, { color: "#7ECBA8", name: "Standup", note: "15 min · 8:00 AM CT" }] },
@@ -257,7 +317,7 @@
                     { color: "#F09A7A", name: "Review discussion", note: "15 min · 8:30 AM CT / 7:00 PM IST" },
                     { color: "#B0B8EE", name: "Sprint planning", note: "30 min · 8:45 AM CT / 7:15 PM IST" },
                     { dashed: true, note: "Release branch freeze — EOD" },
-                    { warning: true, note: "⚠ Retrospective — bi-weekly · EM to schedule" },
+                    { warning: true, note: "Retrospective — bi-weekly · EM to schedule" },
                   ]},
                 ].map(({ day, events, border }) => (
                   <div key={day} style={{ border: "1px solid #D8D8D8", borderRadius: 4, overflow: "hidden", ...(border ? { borderRight: "4px solid #CC0000" } : {}) }}>
@@ -296,8 +356,8 @@
                       desc: "PO pre-plans sprints and workstreams ahead of time so the team sees what's expected before the call. Every ticket must be understood before the team signs off. EM opens the sprint in Jira at the close of planning.",
                       items: ["PO: present the sprint goal in one sentence before walking tickets", "PO: all sprint tickets must be in Jira with AC written before planning starts — no verbal-only scope", "PO: flag tickets that touch ops workflows before the team commits to them", "Dev and QA: ask your own questions on every ticket — this is the time, not standup", "Dev and QA: do not sign off on a ticket you do not fully understand", "Dev and QA: confirm each PBI has a description, AC, and effort estimate before committing — if any are missing, the ticket moves to the next refinement session, not into the sprint", "Everyone: discuss the scope and downstream impact of each PBI on the application before committing — flag concerns to the PO and make sure everything is captured in the ticket", "Everyone: PBIs are not taken into the sprint if any dependency is unresolved or if the team doesn't fully understand the ticket", "Everyone: discuss the leave plan for the next sprint and confirm capacity before the sprint is locked", "DEV/QA/PO: confirm each PBI is properly sliced and in a deliverable state before the sprint closes", "PO: mark a PBI as POC where applicable — a POC may or may not require QA effort; once the POC is finalized, PO creates a new backlog item in the next sprint to productionize it with the necessary QA effort", "EM: confirm capacity and flag any resourcing blockers before the sprint is locked", "EM: open the sprint in Jira at the end of planning"] },
                     { name: "Refinement", when: "Thursday + Monday · ~8:15 AM CT / 6:45 PM IST", dur: "30–45 min · twice weekly · immediately after standup", who: ["PO", "Dev + QA"],
-                      desc: "The most important ceremony we have — and the reason standup stays short. The team comes prepared, engages directly with the PO, and leaves with every ticket fully understood. No open questions carry over.",
-                      items: ["PO: share tickets with AC written before the session — the team cannot refine what they cannot read ahead of time", "Everyone: review PBIs by noon IST the day before and add questions directly to each ticket — come to the session ready to discuss, not to hear about it for the first time", "Dev and QA: rotate who shares screen and walks each ticket — engagement is everyone's job", "Dev and QA: ask your own questions directly to the PO — do not wait for anyone to ask on your behalf", "Everyone: refinement of each PBI is timeboxed to 15 minutes — if it takes longer, the PBI likely lacks sufficient detail and should be skipped to the next session", "Everyone: a PBI is only committed if all open questions are answered — if not, it moves to the next session", "Everyone: whoever raised the question documents the answer in the ticket before the call ends — PO confirms it's captured correctly", "Everyone: no ticket moves to dev with open questions — flag it and hold it", "Everyone: effort is estimated as Low / Medium / High; add an hour estimate if effort needs flagging — this is a ballpark, not a commitment", "PO: Thursday session covers next sprint tickets; Monday session closes gaps on current sprint tickets"] },
+                      desc: "The most important ceremony we have — and the reason standup stays short. PO prepares tickets with AC before the call. Dev and QA engage directly with the PO — every team member asks their own questions. EM participates as a peer, not a translator.",
+                      items: ["PO: share tickets with AC written before the session — the team cannot refine what they cannot read ahead of time", "Team and EM: review PBIs by noon IST the day before the refinement call and add questions directly to each ticket — the session should not be the first time the team sees the tickets", "PO: share their screen while the team asks questions; both ensure all details are captured in the ticket before moving on", "Dev and QA: rotate who shares screen and walks each ticket — engagement is everyone's job", "Dev and QA: ask your own questions directly to the PO — do not wait for the EM to ask on your behalf", "EM: pause after each ticket and confirm the whole team understands before moving on", "Everyone: refinement of each PBI is timeboxed to 15 minutes — if it takes longer, the PBI likely lacks sufficient detail and should be skipped to the next session", "PO: answer every open question in the session and update the PBI before the call ends", "Everyone: a PBI is only committed if all open questions are answered in the session — if not, it moves to the next refinement session", "EM: no ticket moves to dev with open questions — flag it and hold it", "Everyone: effort is estimated as Low / Medium / High; if effort needs flagging beyond that, add an hour estimate to the ticket — this is a ballpark, not a commitment", "PO: Thursday session covers next sprint tickets; Monday session closes gaps on current sprint tickets"] },
                     { name: "Retrospective", when: "Bi-weekly · EM to schedule", dur: "45 min", who: ["PO", "Dev + QA"],
                       desc: "Bi-weekly ceremony scheduled by the EM. The whole team participates including the PO. Retros are a reset, not a complaint session. Any team member can also request an ad-hoc retro between scheduled sessions.",
                       items: ["EM: schedule bi-weekly retros in advance and hold the cadence — do not let it slip", "Any team member: request an ad-hoc retro at any time — EM schedules within the week", "Whole team: Start — what should we try?", "Whole team: Stop — what's slowing us down or causing rework?", "Whole team: Continue — what's working that we should protect?", "EM: every retro ends with named actions, owners, and a follow-up date"] },
@@ -316,9 +376,7 @@
                       </td>
                       <td style={{ padding: "14px 0", verticalAlign: "top" }}>
                         <p style={{ fontSize: 13, lineHeight: "20px", color: "#616568", margin: "0 0 10px" }}>{c.desc}</p>
-                        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                          {c.items.map((item, j) => <li key={j} style={{ fontSize: 13, lineHeight: "20px", color: "#616568", padding: "2px 0 2px 14px", position: "relative" }}><span style={{ position: "absolute", left: 0, color: "#717171" }}>•</span>{item}</li>)}
-                        </ul>
+                        <CeremonyTable items={c.items} />
                       </td>
                     </tr>
                   ))}
@@ -329,15 +387,13 @@
             <Section title="Ticket workflow">
               <p style={{ fontSize: 14, lineHeight: "22px", color: "#616568", margin: "0 0 16px" }}>Every ticket follows this flow without exception. No ticket moves to Done without PO sign-off.</p>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-                {[["Dev","#E8F5EF","#7ECBA8","#0D5238"],["→",null,null,"#717171"],["Peer testing","#E8F5EF","#7ECBA8","#0D5238"],["→",null,null,"#717171"],["QA","#EEF0FC","#B0B8EE","#2F3A8F"],["→",null,null,"#717171"],["UAT","#EEF0FC","#B0B8EE","#2F3A8F"],["→",null,null,"#717171"],["PO Review","#FDEDF4","#E899C0","#6B1240"],["→",null,null,"#717171"],["Done","#DAF2ED","#07C29F","#055C47"]]
+                {[["Dev","#E8F5EF","#7ECBA8","#0D5238"],["→",null,null,"#717171"],["QA","#EEF0FC","#B0B8EE","#2F3A8F"],["→",null,null,"#717171"],["PO Review","#FDEDF4","#E899C0","#6B1240"],["→",null,null,"#717171"],["Done","#DAF2ED","#07C29F","#055C47"]]
                   .map(([label,bg,border,color],i) => bg
                     ? <div key={i} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 4, padding: "10px 16px", fontSize: 13, fontWeight: 700, color }}>{label}</div>
                     : <div key={i} style={{ color, fontSize: 18 }}>{label}</div>)}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Rule title="Peer testing on Dev">Dev: once development is complete, peer testing is done on the Dev environment before the ticket moves to QA. This catches obvious issues before QA picks it up.</Rule>
-                <Rule title="QA testing on QA environment">QA: all testing is done on the QA environment. When satisfied, QA moves the ticket to PO Review. PO: review same day. If rejected, PO moves the ticket back to Dev with a comment explaining what needs to change. Dev fixes, QA re-validates, QA moves back to PO Review.</Rule>
-                <Rule title="PO sign-off on QA or UAT">PO: provide sign-off on QA or UAT before the ticket moves to Done. This is not a rubber stamp — if the ticket is not ready, it does not move forward.</Rule>
+                <Rule title="QA moves ticket to PO review">QA: when satisfied, move the ticket to PO Review. PO: review same day. If rejected, PO moves the ticket back to Dev with a comment explaining what needs to change. Dev fixes, QA re-validates, QA moves back to PO Review.</Rule>
                 <Rule title="PO reviews same day">PO: review tickets the day QA moves them. A ticket sitting in PO Review overnight is a blocked ticket. If you cannot review same day, flag it to the EM so the team knows.</Rule>
               </div>
             </Section>
@@ -373,7 +429,7 @@
                     {cards.map(card => (
                       <div key={card.title} style={{ background: "#F9F9F9", borderRadius: 2, padding: "14px 16px" }}>
                         <WaTag type={card.type}>{card.tag}</WaTag>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 5px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{card.title}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 5px", letterSpacing: "0.01em" }}>{card.title}</div>
                         <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
                           {card.items.map((item,i) => <li key={i} style={{ fontSize: 13, lineHeight: "20px", color: "#616568", padding: "2px 0 2px 14px", position: "relative" }}><span style={{ position: "absolute", left: 0, color: "#717171" }}>•</span>{item}</li>)}
                         </ul>
@@ -386,13 +442,13 @@
               <div style={{ marginBottom: 20 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 700, color: "#000", margin: "0 0 10px", paddingLeft: 10, borderLeft: "3px solid #CC0000" }}>Tools and visibility</h3>
                 {[
-                  { tag: "Workflows Agent", type: "jira", title: "PR visibility in Teams", text: "The Workflows Agent posts a notification in Teams when a PR is open and needs a reviewer. This gives the whole team visibility into what is sitting in review without having to check manually. If a PR is not ready for review, move it to draft immediately so it does not sit unassigned and create noise for the team." },
+                  { tag: "Workflows agent", type: "jira", title: "PR visibility in Teams", text: "The Workflows Agent posts a notification in Teams when a PR is open and needs a reviewer. This gives the whole team visibility into what is sitting in review without having to check manually. If a PR is not ready for review, move it to draft immediately so it does not sit unassigned and create noise for the team." },
                   { tag: "QA", type: "qa", title: "QA is a non-negotiable gate", text: "QA sign-off is required before any release moves to production. This is not a rubber stamp — if a release is not ready, it does not ship. Smoke testing alone is not sufficient — manual validation of key workflows including EMEA and AMER user configurations is required before every release." },
                   { tag: "Releases", type: "qa", title: "Release windows and communication", text: "Releases happen Wednesday by 12:00 PM IST. No release outside this window without advance notice to the PO and explicit sign-off. When a release completes, the PO is pinged in chat. If something goes wrong post-deploy, the team communicates immediately — not after a fix is already in progress." },
                 ].map(({ tag, type, title, text }) => (
                   <div key={title} style={{ background: "#F9F9F9", borderRadius: 2, padding: "14px 16px", marginBottom: 10 }}>
                     <WaTag type={type}>{tag}</WaTag>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{title}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 6px", letterSpacing: "0.01em" }}>{title}</div>
                     <p style={{ fontSize: 13, lineHeight: "20px", color: "#616568", margin: 0 }}>{text}</p>
                   </div>
                 ))}
@@ -406,7 +462,7 @@
                 ].map(({ tag, type, title, text }) => (
                   <div key={title} style={{ background: "#F9F9F9", borderRadius: 2, padding: "14px 16px", marginBottom: 10 }}>
                     <WaTag type={type}>{tag}</WaTag>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{title}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#000", margin: "0 0 6px", letterSpacing: "0.01em" }}>{title}</div>
                     <p style={{ fontSize: 13, lineHeight: "20px", color: "#616568", margin: 0 }}>{text}</p>
                   </div>
                 ))}
@@ -414,7 +470,7 @@
             </Section>
 
             <div style={{ marginTop: 48, paddingTop: 14, borderTop: "1px solid #D8D8D8", fontSize: 11, color: "#717171" }}>
-              Wed → Tue sprint · Release on Wed · Chicago (CT) ↔ Delhi (IST) · Working agreement v2 · Aug 2026
+              Wed to Tue sprint · Release on Wed · Chicago (CT) to Delhi (IST) · Working agreement v2 · Aug 2026
             </div>
           </div>
         </div>
